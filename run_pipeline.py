@@ -12,11 +12,12 @@ It can run once (manually) or on a daily schedule.
 
 import os
 import sys
+import time
 from datetime import datetime, timedelta, date, timezone
 from dotenv import load_dotenv
 from massive import RESTClient
 import psycopg2
-from psycopg2.extras import execute_values, Json
+from utils import ensure_symbol, fetch_ohlcv, insert_ohlcv, log_pipeline_run, fetch_grouped_daily
 from apscheduler.schedulers.blocking import BlockingScheduler
 
 load_dotenv()
@@ -32,103 +33,6 @@ db_config = {
     "user": os.getenv("DB_USER", "market_pipeline"),
     "password": os.getenv("DB_PASSWORD"),
 }
-
-# ── Database Functions ─────────────────────────────────────────────
-
-def ensure_symbol(cursor, ticker):
-    """Insert ticker if it doesn't exist, return its symbol_id."""
-    cursor.execute(
-        """
-        INSERT INTO symbols (ticker)
-        VALUES (%s)
-        ON CONFLICT (ticker) DO NOTHING
-        RETURNING symbol_id;
-        """,
-        (ticker,)
-    )
-    result = cursor.fetchone()
-    if result:
-        return result[0]
-    else:
-        cursor.execute(
-            "SELECT symbol_id FROM symbols WHERE ticker = %s;",
-            (ticker,)
-        )
-        return cursor.fetchone()[0]
-
-
-def fetch_ohlcv(client, ticker, start_date, end_date):
-    """Fetch daily OHLCV bars from Massive.com API."""
-    bars = []
-    for agg in client.list_aggs(
-        ticker=ticker,
-        multiplier=1,
-        timespan="day",
-        from_=start_date,
-        to=end_date,
-        adjusted=True,
-        limit=50000,
-    ):
-        bars.append({
-            "time": datetime.fromtimestamp(agg.timestamp / 1000, tz=timezone.utc),
-            "open": agg.open,
-            "high": agg.high,
-            "low": agg.low,
-            "close": agg.close,
-            "volume": int(agg.volume),
-            "vwap": agg.vwap,
-            "num_trades": agg.transactions,
-        })
-    return bars
-
-
-def insert_ohlcv(cursor, symbol_id, bars):
-    """Bulk upsert OHLCV bars into TimescaleDB."""
-    if not bars:
-        return 0
-
-    values = [
-        (
-            bar["time"], symbol_id,
-            bar["open"], bar["high"], bar["low"], bar["close"],
-            bar["volume"], bar["vwap"], bar["num_trades"], "massive",
-        )
-        for bar in bars
-    ]
-
-    query = """
-        INSERT INTO daily_ohlcv
-            (time, symbol_id, open, high, low, close, volume, vwap, num_trades, source)
-        VALUES %s
-        ON CONFLICT (symbol_id, time) DO UPDATE SET
-            open = EXCLUDED.open,
-            high = EXCLUDED.high,
-            low = EXCLUDED.low,
-            close = EXCLUDED.close,
-            volume = EXCLUDED.volume,
-            vwap = EXCLUDED.vwap,
-            num_trades = EXCLUDED.num_trades,
-            source = EXCLUDED.source;
-    """
-    execute_values(cursor, query, values)
-    return len(values)
-
-
-def log_pipeline_run(cursor, run_type, status, rows_fetched,
-                     rows_inserted, error_message=None, metadata=None):
-    """Record this pipeline run for monitoring."""
-    cursor.execute(
-        """
-        INSERT INTO pipeline_runs
-            (run_type, status, finished_at, rows_fetched, rows_inserted,
-             error_message, metadata)
-        VALUES (%s, %s, NOW(), %s, %s, %s, %s)
-        RETURNING run_id;
-        """,
-        (run_type, status, rows_fetched, rows_inserted,
-         error_message, Json(metadata))
-    )
-    return cursor.fetchone()[0]
 
 # ── Validation Functions ───────────────────────────────────────────
 
@@ -215,32 +119,19 @@ def validate_data(cursor, ticker, start_date, end_date):
 
 def run_daily_pipeline():
     """
-    The main pipeline function. Called once per day.
-    
-    This is what the scheduler triggers. It's wrapped in a function
-    (not just loose code) because APScheduler needs to call it.
-    
-    The structure is:
-    1. Figure out what date range to fetch
-    2. Fetch and insert data
-    3. Validate the data
-    4. Log everything
+    Daily pipeline using Grouped Daily endpoint.
+    One API call fetches all stocks. Then loop to insert each.
     """
-    ticker = "AAPL"
-
-    # We fetch the last 5 trading days every time, not just "today."
-    # Why? Because:
-    # - The API might retroactively correct yesterday's data
-    # - If the pipeline failed yesterday, today's run fills the gap
-    # - It's idempotent so duplicates aren't a problem
-    # This pattern is called "overlapping windows" and is common
-    # in production pipelines.
-    end_date = datetime.now().strftime("%Y-%m-%d")
-    start_date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+    # Fetch last 3 trading days to cover weekends and gaps
+    # We check each date separately with the grouped endpoint
+    dates_to_fetch = []
+    for days_back in range(1, 5):  # yesterday through 4 days ago
+        d = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
+        dates_to_fetch.append(d)
 
     print(f"\n{'='*60}")
     print(f"Pipeline run: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"Ticker: {ticker} | Range: {start_date} to {end_date}")
+    print(f"Dates to fetch: {dates_to_fetch}")
     print(f"{'='*60}")
 
     client = RESTClient(api_key=api_key)
@@ -250,50 +141,69 @@ def run_daily_pipeline():
         conn.autocommit = False
         cursor = conn.cursor()
 
-        # Step 1: Ensure symbol exists
-        symbol_id = ensure_symbol(cursor, ticker)
-        print(f"Symbol: {ticker} (id={symbol_id})")
+        total_inserted = 0
+        total_fetched = 0
 
-        # Step 2: Fetch from API
-        print("Fetching from Massive.com...")
-        bars = fetch_ohlcv(client, ticker, start_date, end_date)
-        print(f"Fetched {len(bars)} bars")
+        for date_str in dates_to_fetch:
+            print(f"\nFetching grouped daily for {date_str}...")
+            try:
+                grouped = fetch_grouped_daily(client, date_str)
+            except Exception as e:
+                print(f"  Failed to fetch {date_str}: {e}")
+                continue
 
-        # Step 3: Insert into TimescaleDB
-        print("Inserting into TimescaleDB...")
-        rows_inserted = insert_ohlcv(cursor, symbol_id, bars)
-        print(f"Inserted/updated {rows_inserted} rows")
+            if not grouped:
+                print(f"  No data for {date_str} (weekend/holiday)")
+                continue
 
-        # Step 4: Validate
-        print("Running validation...")
-        start_dt = datetime.now().date() - timedelta(days=7)
-        end_dt = datetime.now().date()
-        validation = validate_data(cursor, ticker, start_dt, end_dt)
+            # Filter to only stocks in our symbols table
+            cursor.execute("SELECT ticker, symbol_id FROM symbols WHERE is_active = TRUE;")
+            symbol_map = {row[0]: row[1] for row in cursor.fetchall()}
+
+            date_inserted = 0
+            for ticker, bar in grouped.items():
+                if ticker not in symbol_map:
+                    continue  # skip stocks we don't track
+
+                symbol_id = symbol_map[ticker]
+                rows = insert_ohlcv(cursor, symbol_id, [bar])
+                date_inserted += rows
+
+            total_fetched += len(grouped)
+            total_inserted += date_inserted
+            print(f"  Got {len(grouped)} stocks, inserted {date_inserted} for tracked symbols")
+
+            # Rate limit: pause between dates
+            time.sleep(13)  # 5 calls per minute = 1 call per 12 seconds
+
+        # Validate
+        print("\nRunning validation...")
+        start_dt = date.fromisoformat(dates_to_fetch[-1])
+        end_dt = date.fromisoformat(dates_to_fetch[0])
+        validation = validate_data(cursor, "SPY", start_dt, end_dt)
 
         if validation["checks_passed"]:
             print("Validation: ALL CHECKS PASSED")
         else:
-            print(f"Validation: {len(validation['issues'])} issue(s):")
             for issue in validation["issues"]:
                 print(f"  - {issue}")
 
-        # Step 5: Log the run
+        # Log the run
         run_id = log_pipeline_run(
             cursor,
-            run_type="daily_ohlcv",
+            run_type="daily_ohlcv_grouped",
             status="success",
-            rows_fetched=len(bars),
-            rows_inserted=rows_inserted,
+            rows_fetched=total_fetched,
+            rows_inserted=total_inserted,
             metadata={
-                "ticker": ticker,
-                "start": start_date,
-                "end": end_date,
+                "dates": dates_to_fetch,
                 "validation": validation,
             }
         )
 
         conn.commit()
-        print(f"SUCCESS — run_id={run_id}")
+        print(f"\nSUCCESS — run_id={run_id}")
+        print(f"Total: {total_fetched} fetched, {total_inserted} inserted")
 
     except Exception as e:
         conn.rollback()
@@ -304,16 +214,14 @@ def run_daily_pipeline():
             cursor = conn.cursor()
             log_pipeline_run(
                 cursor,
-                run_type="daily_ohlcv",
+                run_type="daily_ohlcv_grouped",
                 status="failed",
                 rows_fetched=0,
                 rows_inserted=0,
                 error_message=str(e),
-                metadata={"ticker": ticker}
             )
         except Exception:
             print("Could not log failure to database.")
-
         raise
 
     finally:
