@@ -1,0 +1,11 @@
+version: 2
+
+sources:
+  - name: public
+    database: market_data
+    schema: public
+    tables:
+      - name: daily_ohlcv
+        description: "Raw daily OHLCV data from Massive.com API"
+      - name: symbols
+        description: "S&P 500 stock symbols with sector information"

@@ -1,0 +1,31 @@
+[0m10:31:59.202693 [debug] [MainThread]: Sending event: {'category': 'dbt', 'action': 'invocation', 'label': 'start', 'context': [<snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x74bf20bc6c60>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x74bf2380b2c0>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x74bf21a0d400>]}
+
+
+============================== 10:31:59.212750 | 9a121b72-4f50-4de2-ad50-78a6e103a170 ==============================
+[0m10:31:59.212750 [info ] [MainThread]: Running with dbt=1.11.8
+[0m10:31:59.213568 [debug] [MainThread]: running dbt with arguments {'log_path': 'logs', 'empty': 'None', 'no_print': 'None', 'version_check': 'True', 'static_parser': 'True', 'partial_parse': 'True', 'cache_selected_only': 'False', 'write_json': 'True', 'profiles_dir': '/home/ubuntu/.dbt', 'send_anonymous_usage_stats': 'True', 'fail_fast': 'False', 'use_experimental_parser': 'False', 'warn_error': 'None', 'warn_error_options': 'WarnErrorOptionsV2(error=[], warn=[], silence=[])', 'printer_width': '80', 'introspect': 'True', 'indirect_selection': 'eager', 'log_cache_events': 'False', 'log_format': 'default', 'use_colors': 'True', 'quiet': 'False', 'invocation_command': 'dbt init market_data', 'debug': 'False', 'target_path': 'None'}
+[0m10:31:59.239905 [info ] [MainThread]: Creating dbt configuration folder at /home/ubuntu/.dbt
+[0m10:31:59.241431 [debug] [MainThread]: Starter project path: /home/ubuntu/market-data-pipeline/venv/lib/python3.12/site-packages/dbt/include/starter_project
+[0m10:31:59.245037 [info ] [MainThread]: 
+Your new dbt project "market_data" was created!
+
+For more information on how to configure the profiles.yml file,
+please consult the dbt documentation here:
+
+  https://docs.getdbt.com/docs/configure-your-profile
+
+One more thing:
+
+Need help? Don't hesitate to reach out to us via GitHub issues or on Slack:
+
+  https://community.getdbt.com/
+
+Happy modeling!
+
+[0m10:31:59.245649 [info ] [MainThread]: Setting up your profile.
+[0m10:38:06.683361 [info ] [MainThread]: Profile market_data written to /home/ubuntu/.dbt/profiles.yml using target's profile_template.yml and your supplied values. Run 'dbt debug' to validate the connection.
+[0m10:38:06.685646 [debug] [MainThread]: Resource report: {"command_name": "init", "command_success": true, "command_wall_clock_time": 367.5545, "process_in_blocks": "34168", "process_kernel_time": 0.161659, "process_mem_max_rss": "107000", "process_out_blocks": "80", "process_user_time": 1.854875}
+[0m10:38:06.686617 [debug] [MainThread]: Command `dbt init` succeeded at 10:38:06.686409 after 367.56 seconds
+[0m10:38:06.687180 [debug] [MainThread]: Sending event: {'category': 'dbt', 'action': 'invocation', 'label': 'end', 'context': [<snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x74bf2114d070>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x74bf20f46f30>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x74bf20e3e660>]}
+[0m10:38:06.687825 [debug] [MainThread]: Flushing usage events
+[0m10:38:07.534207 [debug] [MainThread]: An error was encountered while trying to flush usage events
