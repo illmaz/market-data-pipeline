@@ -67,4 +67,3 @@ anomalies AS (
 )
 
 SELECT * FROM anomalies
-ORDER BY trade_date DESC, volume_ratio DESC

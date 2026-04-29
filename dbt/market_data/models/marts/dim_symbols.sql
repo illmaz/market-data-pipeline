@@ -31,28 +31,13 @@ price_range AS (
 ),
 
 returns_summary AS (
-    -- 30-day and 1-year return for each stock
-    SELECT
-        symbol_id,
-        -- 30-day return: latest close vs close 30 trading days ago
-        ROUND(
-            (LAST_VALUE(close) OVER (
-                PARTITION BY symbol_id
-                ORDER BY trade_date
-                ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
-            ) -
-            NTH_VALUE(close, 30) OVER (
-                PARTITION BY symbol_id
-                ORDER BY trade_date DESC
-                ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
-            )) /
-            NULLIF(NTH_VALUE(close, 30) OVER (
-                PARTITION BY symbol_id
-                ORDER BY trade_date DESC
-                ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
-            ), 0) * 100,
-        2) AS return_30d_pct
-    FROM {{ ref('stg_daily_ohlcv') }}
+    SELECT symbol_id, close AS close_30d_ago
+    FROM (
+        SELECT symbol_id, close,
+            ROW_NUMBER() OVER (PARTITION BY symbol_id ORDER BY trade_date DESC) AS row_num
+        FROM {{ ref('stg_daily_ohlcv') }}
+    ) ranked
+    WHERE row_num = 30
 )
 
 SELECT
@@ -76,17 +61,14 @@ SELECT
     pr.avg_daily_volume,
 
     -- 30-day return (deduplicated — one row per stock)
-    rs.return_30d_pct,
+    ROUND((lp.latest_close - rs.close_30d_ago) / NULLIF(rs.close_30d_ago, 0) * 100, 2) AS return_30d_pct,
 
     -- How far is latest price from all-time high? (drawdown)
     ROUND(
         (lp.latest_close - pr.all_time_high) / NULLIF(pr.all_time_high, 0) * 100,
-    2) AS pct_from_ath
+    2) AS drawdown_from_ath_pct
 
 FROM {{ ref('stg_symbols') }} s
 LEFT JOIN latest_prices lp ON s.symbol_id = lp.symbol_id
 LEFT JOIN price_range pr ON s.symbol_id = pr.symbol_id
-LEFT JOIN (
-    SELECT DISTINCT ON (symbol_id) symbol_id, return_30d_pct
-    FROM returns_summary
-) rs ON s.symbol_id = rs.symbol_id
+LEFT JOIN returns_summary rs ON s.symbol_id = rs.symbol_id

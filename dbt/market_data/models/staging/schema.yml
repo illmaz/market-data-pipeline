@@ -1,0 +1,18 @@
+version: 2
+
+models:
+  - name: stg_daily_ohlcv
+    columns:
+      - name: symbol_id
+        tests: [not_null]
+      - name: trade_date
+        tests: [not_null]
+
+  - name: stg_symbols
+    columns:
+      - name: symbol_id
+        tests: [not_null, unique]
+      - name: ticker
+        tests: [not_null, unique]
+      - name: sector
+        tests: [not_null]

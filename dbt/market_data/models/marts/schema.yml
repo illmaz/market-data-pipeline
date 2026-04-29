@@ -1,0 +1,50 @@
+version: 2
+
+models:
+  - name: fct_daily_returns
+    columns:
+      - name: trade_date
+        tests: [not_null]
+      - name: symbol_id
+        tests: [not_null]
+      - name: day_direction
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['up', 'down', 'flat']
+
+  - name: fct_moving_averages
+    columns:
+      - name: trade_date
+        tests: [not_null]
+      - name: symbol_id
+        tests: [not_null]
+      - name: price_vs_ma20
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['above', 'below', 'at']
+      - name: crossover_signal
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['golden_cross', 'death_cross', 'none']
+
+  - name: fct_volume_anomalies
+    columns:
+      - name: trade_date
+        tests: [not_null]
+      - name: symbol_id
+        tests: [not_null]
+      - name: volume_category
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['extreme', 'high', 'elevated']
+
+  - name: dim_symbols
+    columns:
+      - name: symbol_id
+        tests: [not_null, unique]
+      - name: ticker
+        tests: [not_null, unique]
