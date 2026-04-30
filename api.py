@@ -7,7 +7,7 @@ instead of needing direct database access.
 """
 
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException, Query, Depends, Request
 from main import get_db_connection, pool, limiter, verify_api_key
 
@@ -28,19 +28,29 @@ router = APIRouter()
 def health_check(request: Request):
     """
     A simple endpoint that confirms the API is running.
-    
+
     Every production API has one of these. Monitoring tools
     (like AWS health checks) ping this URL regularly. If it
     stops responding, they send an alert.
-    
+
     It also serves as a quick test: if you visit the URL in
     your browser and see this response, you know the server is up.
     """
-    return {
-        "status": "healthy",
-        "service": "Market Data API",
-        "version": "1.0.0",
-    }
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1;")
+        return {
+            "status": "healthy",
+            "service": "Market Data API",
+            "version": "1.0.0",
+        }
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Database unavailable: {e}")
+    finally:
+        if conn:
+            pool.putconn(conn)
 
 
 # ── Route 2: Get OHLCV Data ───────────────────────────────────────
@@ -85,7 +95,7 @@ def get_ohlcv(
 
     # Set defaults if no dates provided
     if end_date is None:
-        end_date = date.today()
+        end_date = datetime.now(tz=timezone.utc).date()
     if start_date is None:
         start_date = end_date - timedelta(days=30)
 

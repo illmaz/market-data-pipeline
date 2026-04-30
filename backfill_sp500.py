@@ -36,7 +36,7 @@ db_config = {
     "password": os.getenv("DB_PASSWORD"),
 }
 
-S3_BUCKET = "market-data-pipeline-illmaz"
+S3_BUCKET = os.getenv("S3_BUCKET", "market-data-pipeline-illmaz")
 
 
 # ── Get S&P 500 tickers ───────────────────────────────────────────

@@ -1,5 +1,5 @@
 import os 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from massive import RESTClient
 
@@ -14,8 +14,9 @@ client = RESTClient(api_key=api_key)
 
 ticker = "AAPL"
 
-end_date = datetime.now().strftime("%Y-%m-%d")
-start_date = (datetime.now() - timedelta(days=10)).strftime("%Y-%m-%d")
+now_utc = datetime.now(tz=timezone.utc)
+end_date = now_utc.strftime("%Y-%m-%d")
+start_date = (now_utc - timedelta(days=10)).strftime("%Y-%m-%d")
 
 print(f"Fetching {ticker} daily OHLCV from {start_date} to {end_date}")
 print("=" * 60)
@@ -35,7 +36,7 @@ for agg in client.list_aggs(
 print(f"\nReceived {len(aggs)} bars\n")
 
 for bar in aggs:
-    print(f"Date:       {datetime.fromtimestamp(bar.timestamp / 1000).strftime('%Y-%m-%d')}")
+    print(f"Date:       {datetime.fromtimestamp(bar.timestamp / 1000, tz=timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).strftime('%Y-%m-%d')}")
     print(f"Open:       ${bar.open}")
     print(f"High:       ${bar.high}")
     print(f"Low:        ${bar.low}")
