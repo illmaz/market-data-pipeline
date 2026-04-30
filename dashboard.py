@@ -6,65 +6,33 @@ Adds dashboard endpoints to the FastAPI app that show:
 - Data coverage statistics
 - Data quality overview
 - Stock browser with basic stats
-
 """
-
-import os
-from datetime import date, timedelta
-from dotenv import load_dotenv
-from fastapi import FastAPI, Query
+from datetime import date
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse
-import psycopg2
-from psycopg2.extras import RealDictCursor
+from main import get_db_connection, pool, limiter
 
-load_dotenv()
-
-db_config = {
-    "host": os.getenv("DB_HOST", "localhost"),
-    "port": os.getenv("DB_PORT", "5432"),
-    "dbname": os.getenv("DB_NAME", "market_data"),
-    "user": os.getenv("DB_USER", "market_pipeline"),
-    "password": os.getenv("DB_PASSWORD"),
-}
-
-
-def get_db():
-    return psycopg2.connect(**db_config, cursor_factory=RealDictCursor)
-
-
-app = FastAPI(
-    title="Market Data Pipeline Dashboard",
-    description="Monitoring and data exploration for the OHLCV pipeline",
-    version="2.0.0",
-)
+router = APIRouter()
 
 
 # ── Dashboard: Overview Stats ──────────────────────────────────────
 
-@app.get("/api/dashboard/overview")
-def dashboard_overview():
-    """
-    High-level stats about the entire pipeline.
-
-    This is the first thing you'd check every morning:
-    "Is my pipeline healthy? How much data do I have?"
-    """
-    conn = get_db()
+@router.get("/api/dashboard/overview")
+@limiter.limit("60/minute")
+def dashboard_overview(request: Request):
+    conn = get_db_connection()
     try:
         cursor = conn.cursor()
 
-        # Total stocks tracked
         cursor.execute("""
             SELECT COUNT(DISTINCT symbol_id) AS stock_count
             FROM daily_ohlcv;
         """)
         stock_count = cursor.fetchone()["stock_count"]
 
-        # Total data points
         cursor.execute("SELECT COUNT(*) AS total_rows FROM daily_ohlcv;")
         total_rows = cursor.fetchone()["total_rows"]
 
-        # Date range
         cursor.execute("""
             SELECT
                 MIN(time)::date AS earliest_date,
@@ -73,7 +41,6 @@ def dashboard_overview():
         """)
         date_range = cursor.fetchone()
 
-        # Last pipeline run
         cursor.execute("""
             SELECT run_type, status, started_at, finished_at,
                    rows_fetched, rows_inserted, error_message
@@ -83,7 +50,6 @@ def dashboard_overview():
         """)
         last_run = cursor.fetchone()
 
-        # Pipeline success rate (last 30 runs)
         cursor.execute("""
             SELECT
                 COUNT(*) AS total_runs,
@@ -96,7 +62,6 @@ def dashboard_overview():
         """)
         run_stats = cursor.fetchone()
 
-        # Format timestamps
         if last_run and last_run["started_at"]:
             last_run["started_at"] = last_run["started_at"].isoformat()
         if last_run and last_run["finished_at"]:
@@ -119,21 +84,15 @@ def dashboard_overview():
         }
 
     finally:
-        conn.close()
+        pool.putconn(conn)
 
 
 # ── Dashboard: Sector Breakdown ────────────────────────────────────
 
-@app.get("/api/dashboard/sectors")
-def sector_breakdown():
-    """
-    How many stocks do we track per sector?
-
-    The S&P 500 has 11 sectors (Technology, Healthcare, etc.).
-    This shows coverage and helps spot if we're missing data
-    for an entire sector.
-    """
-    conn = get_db()
+@router.get("/api/dashboard/sectors")
+@limiter.limit("60/minute")
+def sector_breakdown(request: Request):
+    conn = get_db_connection()
     try:
         cursor = conn.cursor()
         cursor.execute("""
@@ -150,7 +109,6 @@ def sector_breakdown():
             GROUP BY s.sector
             ORDER BY stock_count DESC;
         """)
-
         rows = cursor.fetchall()
         return {
             "sector_count": len(rows),
@@ -158,40 +116,31 @@ def sector_breakdown():
         }
 
     finally:
-        conn.close()
+        pool.putconn(conn)
 
 
 # ── Dashboard: Top Movers ──────────────────────────────────────────
 
-@app.get("/api/dashboard/movers")
+@router.get("/api/dashboard/movers")
+@limiter.limit("60/minute")
 def top_movers(
+    request: Request,
     trading_date: date = Query(
         default=None,
         description="Date to check (defaults to latest available)"
     ),
 ):
-    """
-    Top gainers and losers for a given trading day.
-
-    This is the kind of endpoint that makes your dashboard
-    feel like a real financial terminal. Bloomberg and Yahoo
-    Finance have exactly this feature.
-    """
-    conn = get_db()
+    conn = get_db_connection()
     try:
         cursor = conn.cursor()
 
-        # Get the latest trading date if none specified
         if trading_date is None:
-            cursor.execute(
-                "SELECT MAX(time)::date FROM daily_ohlcv;"
-            )
+            cursor.execute("SELECT MAX(time)::date FROM daily_ohlcv;")
             trading_date = cursor.fetchone()["max"]
 
         if trading_date is None:
             return {"error": "No data available"}
 
-        # Calculate daily return for each stock
         cursor.execute("""
             SELECT
                 s.ticker,
@@ -211,7 +160,6 @@ def top_movers(
 
         all_stocks = cursor.fetchall()
 
-        # Convert Decimal to float for JSON
         for stock in all_stocks:
             for key in ["open", "close", "daily_return_pct"]:
                 if stock[key] is not None:
@@ -228,27 +176,18 @@ def top_movers(
         }
 
     finally:
-        conn.close()
+        pool.putconn(conn)
 
 
 # ── Dashboard: Data Quality Report ─────────────────────────────────
 
-@app.get("/api/dashboard/data-quality")
-def data_quality_report():
-    """
-    Summary of data quality across all stocks.
-
-    Checks for:
-    - Stocks with suspiciously few bars (might be missing data)
-    - Stocks with zero volume days
-    - OHLC relationship violations
-    """
-    conn = get_db()
+@router.get("/api/dashboard/data-quality")
+@limiter.limit("60/minute")
+def data_quality_report(request: Request):
+    conn = get_db_connection()
     try:
         cursor = conn.cursor()
 
-        # Stocks with fewer bars than expected
-        # 2 years ≈ 504 trading days. Flag anything under 400.
         cursor.execute("""
             SELECT s.ticker, s.name, COUNT(*) AS bar_count
             FROM daily_ohlcv d
@@ -260,7 +199,6 @@ def data_quality_report():
         """)
         low_coverage = cursor.fetchall()
 
-        # Zero volume days (last 30 days only)
         cursor.execute("""
             SELECT s.ticker, d.time::date AS trade_date, d.volume
             FROM daily_ohlcv d
@@ -274,7 +212,6 @@ def data_quality_report():
         for row in zero_volume:
             row["trade_date"] = row["trade_date"].isoformat()
 
-        # OHLC violations
         cursor.execute("""
             SELECT COUNT(*) AS violation_count
             FROM daily_ohlcv
@@ -287,7 +224,6 @@ def data_quality_report():
         """)
         violations = cursor.fetchone()["violation_count"]
 
-        # Overall health score
         cursor.execute(
             "SELECT COUNT(DISTINCT symbol_id) FROM daily_ohlcv;"
         )
@@ -313,18 +249,14 @@ def data_quality_report():
         }
 
     finally:
-        conn.close()
+        pool.putconn(conn)
 
 
 # ── Dashboard: HTML Page ───────────────────────────────────────────
 
-@app.get("/", response_class=HTMLResponse)
-def dashboard_page():
-    """
-    A simple HTML dashboard that calls our API endpoints
-    and displays the results. This is what you'd show in
-    an interview or put in your portfolio README.
-    """
+@router.get("/", response_class=HTMLResponse)
+@limiter.limit("60/minute")
+def dashboard_page(request: Request):
     return """
     <!DOCTYPE html>
     <html>
@@ -412,7 +344,6 @@ def dashboard_page():
         <script>
             async function loadDashboard() {
                 try {
-                    // Fetch all data in parallel
                     const [overview, movers, sectors, quality] =
                         await Promise.all([
                             fetch('/api/dashboard/overview').then(r => r.json()),
@@ -421,7 +352,6 @@ def dashboard_page():
                             fetch('/api/dashboard/data-quality').then(r => r.json()),
                         ]);
 
-                    // Overview cards
                     const statusClass = overview.last_pipeline_run?.status === 'success'
                         ? 'status-good' : 'status-failed';
 
@@ -452,7 +382,6 @@ def dashboard_page():
                         </div>
                     `;
 
-                    // Movers tables
                     function renderMovers(tableId, stocks) {
                         const tbody = document.querySelector(`#${tableId} tbody`);
                         tbody.innerHTML = stocks?.map(s => `
@@ -471,7 +400,6 @@ def dashboard_page():
                     renderMovers('gainers-table', movers.top_10_gainers);
                     renderMovers('losers-table', movers.top_10_losers);
 
-                    // Sectors table
                     const sectorsTbody = document.querySelector('#sectors-table tbody');
                     sectorsTbody.innerHTML = sectors.sectors?.map(s => `
                         <tr>
@@ -481,7 +409,6 @@ def dashboard_page():
                         </tr>
                     `).join('') || '';
 
-                    // Quality cards
                     const qClass = quality.health_score === 'GOOD'
                         ? 'status-good'
                         : quality.health_score === 'WARNING'

@@ -40,8 +40,8 @@ def fetch_ohlcv(client, ticker, start_date, end_date):
     ):
         bars.append({
         "time": datetime.fromtimestamp(
-                agg.timestamp / 1000, tz=timezone.utc
-            ),
+        agg.timestamp / 1000, tz=timezone.utc
+        ).replace(hour=0, minute=0, second=0, microsecond=0),
             "open": agg.open,
             "high": agg.high,
             "low": agg.low,
@@ -120,7 +120,9 @@ def fetch_grouped_daily(client, date_str):
     results = {}
     for agg in client.get_grouped_daily_aggs(date_str):
         results[agg.ticker] = {
-            "time": datetime.fromtimestamp(agg.timestamp / 1000, tz=timezone.utc),
+            "time": datetime.fromtimestamp(
+            agg.timestamp / 1000, tz=timezone.utc
+            ).replace(hour=0, minute=0, second=0, microsecond=0),
             "open": agg.open,
             "high": agg.high,
             "low": agg.low,

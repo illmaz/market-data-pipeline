@@ -1,4 +1,5 @@
 import os
+import sys
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from massive import RESTClient
@@ -19,14 +20,34 @@ db_config = {
     "password": os.getenv("DB_PASSWORD"),
 }
 
+# ── Retry logic ────────────────────────────────────────────────────
+
+def fetch_with_retry(fetch_func, max_retries=3):
+    for attempt in range(max_retries):
+        try:
+            return fetch_func()
+        except Exception as e:
+            if attempt == max_retries - 1:
+                raise
+            wait = 5 * (2 ** attempt)
+            print(f"  Attempt {attempt + 1} failed: {e}")
+            print(f"  Retrying in {wait} seconds...")
+            import time; time.sleep(wait)
+
+
 # -- Main execution ----------------
 
 if __name__ == "__main__":
-    ticker = "AAPL"
+    if len(sys.argv) < 2:
+        print("Usage: python ingest.py <TICKER>")
+        print("Example: python ingest.py MSFT")
+        sys.exit(1)
+    ticker = sys.argv[1].upper()
 
     # Fetch the last 5 trading days (using 10 calendar days for safety)
-    end_date = datetime.now().strftime("%Y-%m-%d")
-    start_date = (datetime.now() - timedelta(days=10)).strftime("%Y-%m-%d")
+    now_utc = datetime.now(tz=timezone.utc)
+    end_date = now_utc.strftime("%Y-%m-%d")
+    start_date = (now_utc - timedelta(days=10)).strftime("%Y-%m-%d")
 
     print(f"Pipeline starting: {ticker} from {start_date} to {end_date}")
     print("=" * 60)
@@ -50,7 +71,9 @@ if __name__ == "__main__":
 
         # Step 2: Fetch data from API
         print(f"Fetching data from Massive.com...")
-        bars = fetch_ohlcv(client, ticker, start_date, end_date)
+        bars = fetch_with_retry(
+        lambda: fetch_ohlcv(client, ticker, start_date, end_date)
+    )
         print(f"Fetched {len(bars)} bars")
 
         # Step 3: Insert into database

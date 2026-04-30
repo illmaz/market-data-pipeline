@@ -12,6 +12,7 @@ import psycopg2
 from psycopg2.extras import execute_values, Json
 import pandas as pd
 import boto3
+import sys
 
 load_dotenv()
 
@@ -107,7 +108,7 @@ def fetch_historical(client, ticker, start_date, end_date):
         limit=50000,
     ):
         bars.append({
-            "time": datetime.fromtimestamp(agg.timestamp / 1000, tz=timezone.utc),
+            "time": datetime.fromtimestamp(agg.timestamp / 1000, tz=timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0),
             "ticker": ticker,
             "open": agg.open,
             "high": agg.high,
@@ -180,14 +181,38 @@ def save_to_parquet_s3(bars, ticker):
 
     return s3_key
 
+# ── Retry logic ────────────────────────────────────────────────────
+
+def fetch_with_retry(fetch_func, max_retries=3):
+    """
+    Retry a function with exponential backoff.
+    Attempts: 3 total. Wait times: 5s, 10s, 20s.
+    """
+    for attempt in range(max_retries):
+        try:
+            return fetch_func()
+        except Exception as e:
+            if attempt == max_retries - 1:
+                raise
+            wait = 5 * (2 ** attempt)
+            print(f"  Attempt {attempt + 1} failed: {e}")
+            print(f"  Retrying in {wait} seconds...")
+            time.sleep(wait)
+
 # ── Main execution ─────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    ticker = "AAPL"
+    if len(sys.argv) < 2:
+        print("Usage: python backfill.py <TICKER>")
+        print("Example: python backfill.py MSFT")
+        sys.exit(1)
+
+    ticker = sys.argv[1].upper()
 
     # 2 years of history
-    end_date = datetime.now().strftime("%Y-%m-%d")
-    start_date = (datetime.now() - timedelta(days=730)).strftime("%Y-%m-%d")
+    now_utc = datetime.now(tz=timezone.utc)
+    end_date = now_utc.strftime("%Y-%m-%d")
+    start_date = (now_utc - timedelta(days=730)).strftime("%Y-%m-%d")
 
     print(f"Historical backfill: {ticker}")
     print(f"Range: {start_date} to {end_date}")
@@ -195,7 +220,9 @@ if __name__ == "__main__":
 
     # ── Step 1: Fetch from API ─────────────────────────────────────
     client = RESTClient(api_key=api_key)
-    bars = fetch_historical(client, ticker, start_date, end_date)
+    bars = fetch_with_retry(
+        lambda: fetch_historical(client, ticker, start_date, end_date)
+    )
 
     if not bars:
         print("No data returned. Exiting.")

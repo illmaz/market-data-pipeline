@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 from massive import RESTClient
 import psycopg2
 from utils import ensure_symbol, fetch_ohlcv, insert_ohlcv, log_pipeline_run, fetch_grouped_daily
-from apscheduler.schedulers.blocking import BlockingScheduler
+
 
 load_dotenv()
 
@@ -126,7 +126,7 @@ def run_daily_pipeline():
     # We check each date separately with the grouped endpoint
     dates_to_fetch = []
     for days_back in range(1, 5):  # yesterday through 4 days ago
-        d = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
+        d = (datetime.now(tz=timezone.utc) - timedelta(days=days_back)).strftime("%Y-%m-%d")
         dates_to_fetch.append(d)
 
     print(f"\n{'='*60}")
@@ -230,6 +230,7 @@ def run_daily_pipeline():
 # ── Entry Point ────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    run_daily_pipeline()
     # sys.argv is a list of command-line arguments.
     # sys.argv[0] is always the script name ("run_pipeline.py")
     # sys.argv[1] would be the first argument you type after the script name.

@@ -124,9 +124,7 @@ def fetch_historical(client, ticker, start_date, end_date):
         limit=50000,
     ):
         bars.append({
-            "time": datetime.fromtimestamp(
-                agg.timestamp / 1000, tz=timezone.utc
-            ),
+            "time": datetime.fromtimestamp(agg.timestamp / 1000, tz=timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0),
             "ticker": ticker,
             "open": agg.open,
             "high": agg.high,
@@ -162,8 +160,9 @@ def save_to_parquet_s3(bars, ticker):
 
 if __name__ == "__main__":
     # Date range: 2 years
-    end_date = datetime.now().strftime("%Y-%m-%d")
-    start_date = (datetime.now() - timedelta(days=730)).strftime("%Y-%m-%d")
+    now_utc = datetime.now(tz=timezone.utc)
+    end_date = now_utc.strftime("%Y-%m-%d")
+    start_date = (now_utc - timedelta(days=730)).strftime("%Y-%m-%d")
 
     print("S&P 500 Historical Backfill")
     print(f"Range: {start_date} to {end_date}")
@@ -183,8 +182,8 @@ if __name__ == "__main__":
     # Step 2: Set up API client and database
     client = RESTClient(api_key=api_key)
     conn = psycopg2.connect(**db_config)
-    conn.autocommit = True  # Commit after each ticker so we don't
-                             # lose everything if it crashes at ticker #400
+    con
+    n.autocommit = False
     cursor = conn.cursor()
 
     # Track progress
@@ -239,6 +238,7 @@ if __name__ == "__main__":
 
             # Insert into TimescaleDB
             rows = insert_ohlcv(cursor, symbol_id, bars)
+            conn.commit()
 
             # Save to S3
             save_to_parquet_s3(bars, ticker)
@@ -247,6 +247,7 @@ if __name__ == "__main__":
             success += 1
 
         except Exception as e:
+            conn.rollback()
             print(f"  ✗ ERROR: {e}")
             failed.append((ticker, str(e)))
             # Don't stop — continue with next ticker

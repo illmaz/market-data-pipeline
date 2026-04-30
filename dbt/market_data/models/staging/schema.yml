@@ -2,9 +2,18 @@ version: 2
 
 models:
   - name: stg_daily_ohlcv
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [symbol_id, trade_date]
     columns:
       - name: symbol_id
-        tests: [not_null]
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_symbols')
+                field: symbol_id
       - name: trade_date
         tests: [not_null]
 

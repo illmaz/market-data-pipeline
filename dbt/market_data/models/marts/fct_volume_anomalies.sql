@@ -1,3 +1,8 @@
+{{ config(
+    unique_key=['symbol_id', 'trade_date'],
+    on_schema_change='sync_all_columns'
+) }}
+
 -- fct_volume_anomalies.sql
 -- Flags trading days where volume is significantly above normal.
 -- High volume often precedes large price moves — earnings surprises,
@@ -30,6 +35,9 @@ WITH volume_stats AS (
         0) AS stddev_volume_30d
 
     FROM {{ ref('stg_daily_ohlcv') }}
+    {% if is_incremental() %}
+    WHERE trade_date >= (SELECT MAX(trade_date) - INTERVAL '60 days' FROM {{ this }})
+    {% endif %}
 ),
 
 anomalies AS (

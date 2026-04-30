@@ -1,7 +1,7 @@
 
 # Name your project! Project names should contain only lowercase characters
 # and underscores. A good package name should reflect your organization's
-# name or the intended use of these models
+# name or the intended use of these models 
 name: 'market_data'
 version: '1.0.0'
 
@@ -35,3 +35,9 @@ models:
       +materialized: view
     marts:
       +materialized: table
+      fct_daily_returns:
+        +materialized: incremental
+      fct_moving_averages:
+        +materialized: incremental
+      fct_volume_anomalies:
+        +materialized: incremental

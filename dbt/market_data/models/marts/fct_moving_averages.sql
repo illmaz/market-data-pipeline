@@ -1,3 +1,8 @@
+{{ config(
+    unique_key=['symbol_id', 'trade_date'],
+    on_schema_change='sync_all_columns'
+) }}
+
 -- fct_moving_averages.sql
 -- Calculates 20-day and 50-day moving averages for each stock.
 -- Moving averages are the most fundamental technical indicator —
@@ -45,6 +50,9 @@ WITH moving_avgs AS (
         ) AS trading_days_count
 
     FROM {{ ref('stg_daily_ohlcv') }}
+    {% if is_incremental() %}
+    WHERE trade_date >= (SELECT MAX(trade_date) - INTERVAL '90 days' FROM {{ this }})
+    {% endif %}
 ),
 
 signals AS (

@@ -1,3 +1,8 @@
+{{ config(
+    unique_key=['symbol_id', 'trade_date'],
+    on_schema_change='sync_all_columns'
+) }}
+
 -- fct_daily_returns.sql
 -- Calculates the daily percentage return for each stock.
 -- Uses LAG() window function to get the previous trading day's close price.
@@ -19,6 +24,9 @@ WITH base AS (
             ORDER BY trade_date
         ) AS prev_close
     FROM {{ ref('stg_daily_ohlcv') }}
+    {% if is_incremental() %}
+    WHERE trade_date >= (SELECT MAX(trade_date) - INTERVAL '7 days' FROM {{ this }})
+    {% endif %}
 ),
 
 returns AS (

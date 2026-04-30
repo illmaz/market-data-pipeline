@@ -6,55 +6,26 @@ Other applications can fetch stock data via HTTP requests
 instead of needing direct database access.
 """
 
-import os
+
 from datetime import date, timedelta
-from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query
-import psycopg2
-from psycopg2.extras import RealDictCursor
-
-load_dotenv()
-
-db_config = {
-    "host": os.getenv("DB_HOST", "localhost"),
-    "port": os.getenv("DB_PORT", "5432"),
-    "dbname": os.getenv("DB_NAME", "market_data"),
-    "user": os.getenv("DB_USER", "market_pipeline"),
-    "password": os.getenv("DB_PASSWORD"),
-}
+from fastapi import APIRouter, HTTPException, Query, Depends, Request
+from main import get_db_connection, pool, limiter, verify_api_key
 
 
-def get_db_connection():
-    """
-    Create a fresh database connection.
-    
-    We create a new connection for each request rather than sharing one.
-    Why? Because if two people hit the API at the same time with a shared
-    connection, their queries can interfere with each other. One connection
-    per request is simpler and safer.
-    
-    RealDictCursor makes rows come back as dictionaries instead of tuples.
-    Instead of row[0], row[1] you get row["date"], row["open"].
-    This makes the code more readable and the JSON output automatic.
-    """
-    return psycopg2.connect(**db_config, cursor_factory=RealDictCursor)
 
 
 # ── Create the FastAPI app ─────────────────────────────────────────
 # This creates the application object. All routes are attached to it.
 # In DocIQ you did the same thing.
 
-app = FastAPI(
-    title="Market Data API",
-    description="Daily OHLCV data for US equities",
-    version="1.0.0",
-)
+router = APIRouter()
 
 
 # ── Route 1: Health Check ──────────────────────────────────────────
 
-@app.get("/")
-def health_check():
+@router.get("/health")
+@limiter.limit("60/minute")
+def health_check(request: Request):
     """
     A simple endpoint that confirms the API is running.
     
@@ -74,8 +45,10 @@ def health_check():
 
 # ── Route 2: Get OHLCV Data ───────────────────────────────────────
 
-@app.get("/api/ohlcv/{ticker}")
+@router.get("/api/ohlcv/{ticker}")
+@limiter.limit("60/minute")
 def get_ohlcv(
+    request: Request,
     ticker: str,
     start_date: date = Query(
         default=None,
@@ -91,6 +64,7 @@ def get_ohlcv(
         le=1000,    # le = "less than or equal to" — maximum value is 1000
         description="Max number of rows to return."
     ),
+      api_key: str = Depends(verify_api_key),  # Require API key for this route
 ):
     """
     Fetch daily OHLCV data for a given stock ticker.
@@ -188,13 +162,14 @@ def get_ohlcv(
         }
 
     finally:
-        conn.close()
+        pool.putconn(conn)  # Return the connection to the pool
 
 
 # ── Route 3: List Available Tickers ────────────────────────────────
 
-@app.get("/api/symbols")
-def list_symbols():
+@router.get("/api/symbols")
+@limiter.limit("60/minute")
+def list_symbols(request: Request, api_key: str = Depends(verify_api_key)):
     """
     Returns all tickers we have data for.
     
@@ -234,13 +209,14 @@ def list_symbols():
         }
 
     finally:
-        conn.close()
+        pool.putconn(conn)  # Return the connection to the pool
 
 
 # ── Route 4: Pipeline Status ──────────────────────────────────────
 
-@app.get("/api/pipeline/status")
-def pipeline_status():
+@router.get("/api/pipeline/status")
+@limiter.limit("60/minute")
+def pipeline_status(request: Request, api_key: str = Depends(verify_api_key)):
     """
     Shows the last 10 pipeline runs.
     
@@ -281,4 +257,4 @@ def pipeline_status():
         }
 
     finally:
-        conn.close()
+        pool.putconn(conn)  # Return the connection to the pool
