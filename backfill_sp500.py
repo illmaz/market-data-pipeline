@@ -182,8 +182,7 @@ if __name__ == "__main__":
     # Step 2: Set up API client and database
     client = RESTClient(api_key=api_key)
     conn = psycopg2.connect(**db_config)
-    con
-    n.autocommit = False
+    conn.autocommit = False
     cursor = conn.cursor()
 
     # Track progress
