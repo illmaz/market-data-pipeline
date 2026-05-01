@@ -9,6 +9,8 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 load_dotenv()
+from fastapi.templating import Jinja2Templates
+templates = Jinja2Templates(directory="templates")
 
 # ── Rate limiter ───────────────────────────────────────────────────
 # Tracks requests per IP address. Limits are applied per route.

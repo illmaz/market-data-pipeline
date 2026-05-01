@@ -14,6 +14,8 @@ from main import get_db_connection, pool, limiter, verify_api_key
 
 
 
+
+
 # ── Create the FastAPI app ─────────────────────────────────────────
 # This creates the application object. All routes are attached to it.
 # In DocIQ you did the same thing.
@@ -191,7 +193,7 @@ def list_symbols(request: Request, api_key: str = Depends(verify_api_key)):
     try:
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT
+            SELECT DISTINCT ON (s.ticker)
                 s.ticker,
                 s.name,
                 s.sector,
@@ -268,3 +270,143 @@ def pipeline_status(request: Request, api_key: str = Depends(verify_api_key)):
 
     finally:
         pool.putconn(conn)  # Return the connection to the pool
+
+# ── Route 5: Stock Screener ────────────────────────────────────────
+
+@router.get("/api/screener")
+@limiter.limit("30/minute")
+def stock_screener(
+    request: Request,
+    min_return: float = Query(default=None, description="Minimum daily return % (e.g. 2.0)"),
+    max_return: float = Query(default=None, description="Maximum daily return % (e.g. -2.0)"),
+    min_volume_ratio: float = Query(default=None, description="Minimum volume ratio vs 20d avg (e.g. 1.5)"),
+    price_vs_ma50: str = Query(default=None, description="above or below"),
+    price_vs_ma20: str = Query(default=None, description="above or below"),
+    crossover_signal: str = Query(default=None, description="golden_cross or death_cross"),
+    volume_category: str = Query(default=None, description="elevated, high, or extreme"),
+    day_direction: str = Query(default=None, description="up, down, or flat"),
+    sector: str = Query(default=None, description="Sector name e.g. Technology"),
+    api_key: str = Depends(verify_api_key),
+):
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+
+        # Find the latest trading day that exists in fct_daily_returns.
+        # We always screen against the most recent complete day —
+        # never against a partial or missing day.
+        cursor.execute("""
+            SELECT MAX(trade_date) FROM analytics.fct_daily_returns;
+        """)
+        latest_date = cursor.fetchone()["max"]
+
+        if not latest_date:
+            raise HTTPException(status_code=404, detail="No analytics data available. Run dbt first.")
+
+        # Build WHERE clause dynamically.
+        # Each condition is only added if the user provided that parameter.
+        # params list holds the values that map to %s placeholders —
+        # psycopg2 handles escaping so we're safe from SQL injection.
+        conditions = ["r.trade_date = %s"]
+        params = [latest_date]
+
+        if min_return is not None:
+            conditions.append("r.daily_return_pct >= %s")
+            params.append(min_return)
+
+        if max_return is not None:
+            conditions.append("r.daily_return_pct <= %s")
+            params.append(max_return)
+
+        if min_volume_ratio is not None:
+            conditions.append("ma.volume_ratio >= %s")
+            params.append(min_volume_ratio)
+
+        if price_vs_ma50 is not None:
+            conditions.append("ma.price_vs_ma50 = %s")
+            params.append(price_vs_ma50.lower())
+
+        if price_vs_ma20 is not None:
+            conditions.append("ma.price_vs_ma20 = %s")
+            params.append(price_vs_ma20.lower())
+
+        if crossover_signal is not None:
+            conditions.append("ma.crossover_signal = %s")
+            params.append(crossover_signal.lower())
+
+        if volume_category is not None:
+            conditions.append("va.volume_category = %s")
+            params.append(volume_category.lower())
+
+        if day_direction is not None:
+            conditions.append("r.day_direction = %s")
+            params.append(day_direction.lower())
+
+        if sector is not None:
+            conditions.append("s.sector = %s")
+            params.append(sector)
+
+        where_clause = " AND ".join(conditions)
+
+        query = f"""
+            SELECT * FROM (
+                SELECT DISTINCT ON (s.ticker)
+                    s.ticker,
+                    s.name,
+                    s.sector,
+                    r.close,
+                    r.daily_return_pct,
+                    r.intraday_return_pct,
+                    r.day_direction,
+                    r.volume,
+                    ma.ma_20,
+                    ma.ma_50,
+                    ma.price_vs_ma20,
+                    ma.price_vs_ma50,
+                    ma.crossover_signal,
+                    ma.volume_ratio,
+                    va.volume_category
+                FROM analytics.fct_daily_returns r
+                JOIN symbols s
+                    ON r.symbol_id = s.symbol_id
+                JOIN analytics.fct_moving_averages ma
+                    ON ma.symbol_id = r.symbol_id
+                    AND ma.trade_date = r.trade_date
+                LEFT JOIN analytics.fct_volume_anomalies va
+                    ON va.symbol_id = r.symbol_id
+                    AND va.trade_date = r.trade_date
+                WHERE {where_clause}
+                ORDER BY s.ticker
+            ) deduped
+            ORDER BY daily_return_pct DESC;
+        """
+
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+
+        # Convert Decimal and date types for JSON serialisation
+        for row in rows:
+            for key in ["close", "daily_return_pct", "intraday_return_pct",
+                        "ma_20", "ma_50", "volume_ratio"]:
+                if row[key] is not None:
+                    row[key] = float(row[key])
+
+        return {
+            "screen_date": latest_date.isoformat(),
+            "filters_applied": {
+                "min_return": min_return,
+                "max_return": max_return,
+                "min_volume_ratio": min_volume_ratio,
+                "price_vs_ma50": price_vs_ma50,
+                "price_vs_ma20": price_vs_ma20,
+                "crossover_signal": crossover_signal,
+                "volume_category": volume_category,
+                "day_direction": day_direction,
+                "sector": sector,
+            },
+            "count": len(rows),
+            "results": rows,
+        }
+
+    finally:
+        pool.putconn(conn)

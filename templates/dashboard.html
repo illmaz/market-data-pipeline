@@ -1,0 +1,780 @@
+
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Market Data Pipeline Dashboard</title>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI',
+                             Roboto, sans-serif;
+                background: #0f1117;
+                color: #e1e4e8;
+                padding: 20px;
+            }
+            h1 { color: #58a6ff; margin-bottom: 20px; }
+            h2 {
+                color: #8b949e; margin: 28px 0 10px;
+                font-size: 13px; text-transform: uppercase; letter-spacing: 1px;
+            }
+            .grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+                gap: 16px;
+                margin-bottom: 24px;
+            }
+            .card {
+                background: #161b22;
+                border: 1px solid #30363d;
+                border-radius: 8px;
+                padding: 20px;
+            }
+            .card .label { color: #8b949e; font-size: 13px; }
+            .card .value {
+                font-size: 32px; font-weight: bold;
+                color: #58a6ff; margin-top: 4px;
+            }
+            .card .sub { color: #8b949e; font-size: 12px; margin-top: 4px; }
+            .status-good { color: #3fb950; }
+            .status-warning { color: #d29922; }
+            .status-failed { color: #f85149; }
+
+            /* ── Chart section ── */
+            #chart-section {
+                background: #161b22;
+                border: 1px solid #30363d;
+                border-radius: 8px;
+                padding: 20px;
+                margin-bottom: 24px;
+            }
+            #chart-header {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                margin-bottom: 16px;
+                flex-wrap: wrap;
+            }
+            #chart-title {
+                color: #58a6ff;
+                font-size: 18px;
+                font-weight: bold;
+                min-width: 120px;
+            }
+            #chart-status {
+                color: #8b949e;
+                font-size: 13px;
+            }
+            .search-row {
+                display: flex;
+                gap: 8px;
+                align-items: center;
+                margin-bottom: 20px;
+            }
+            #ticker-input {
+                background: #0f1117;
+                border: 1px solid #30363d;
+                border-radius: 6px;
+                color: #e1e4e8;
+                padding: 8px 12px;
+                font-size: 14px;
+                width: 140px;
+                text-transform: uppercase;
+            }
+            #ticker-input:focus {
+                outline: none;
+                border-color: #58a6ff;
+            }
+            #search-btn {
+                background: #1f6feb;
+                border: none;
+                border-radius: 6px;
+                color: #fff;
+                padding: 8px 16px;
+                font-size: 14px;
+                cursor: pointer;
+            }
+            #search-btn:hover { background: #388bfd; }
+            #chart-canvas-wrap {
+                position: relative;
+                height: 320px;
+            }
+
+            /* ── Tables ── */
+            table {
+                width: 100%; border-collapse: collapse;
+                background: #161b22; border-radius: 8px;
+                overflow: hidden; margin-bottom: 24px;
+            }
+            th {
+                background: #21262d; color: #8b949e;
+                padding: 10px 16px; text-align: left;
+                font-size: 12px; text-transform: uppercase;
+            }
+            td { padding: 10px 16px; border-top: 1px solid #30363d; font-size: 13px; }
+            tbody tr { cursor: pointer; transition: background 0.15s; }
+            tbody tr:hover { background: #1c2128; }
+            .positive { color: #3fb950; }
+            .negative { color: #f85149; }
+            .ticker-cell { color: #58a6ff; font-weight: bold; }
+
+            /* ── Sector filter ── */
+            #sectors-table tbody tr { cursor: pointer; }
+            #sectors-table tbody tr.active-sector {
+                background: #1c3a5e;
+                border-left: 3px solid #58a6ff;
+            }
+            .sector-hint {
+                color: #8b949e; font-size: 12px;
+                margin-bottom: 8px; margin-top: -4px;
+            }
+
+            #loading { color: #8b949e; padding: 40px; text-align: center; }
+        
+            /* Screener */
+            #screener-section {
+                background: #161b22;
+                border: 1px solid #30363d;
+                border-radius: 8px;
+                padding: 20px;
+                margin-bottom: 24px;
+            }
+            .screener-filters {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                gap: 12px;
+                margin-bottom: 16px;
+            }
+            .filter-group {
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+            }
+            .filter-group label {
+                color: #8b949e;
+                font-size: 11px;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+            }
+            .filter-group input,
+            .filter-group select {
+                background: #0f1117;
+                border: 1px solid #30363d;
+                border-radius: 6px;
+                color: #e1e4e8;
+                padding: 7px 10px;
+                font-size: 13px;
+            }
+            .filter-group input:focus,
+            .filter-group select:focus {
+                outline: none;
+                border-color: #58a6ff;
+            }
+            .screener-actions {
+                display: flex;
+                gap: 10px;
+                align-items: center;
+                margin-bottom: 16px;
+            }
+            #run-screener-btn {
+                background: #238636;
+                border: none;
+                border-radius: 6px;
+                color: #fff;
+                padding: 8px 20px;
+                font-size: 14px;
+                cursor: pointer;
+                font-weight: 600;
+            }
+            #run-screener-btn:hover { background: #2ea043; }
+            #clear-screener-btn {
+                background: transparent;
+                border: 1px solid #30363d;
+                border-radius: 6px;
+                color: #8b949e;
+                padding: 8px 16px;
+                font-size: 14px;
+                cursor: pointer;
+            }
+            #clear-screener-btn:hover { color: #e1e4e8; border-color: #8b949e; }
+            #screener-result-count { color: #8b949e; font-size: 13px; }
+            .signal-golden { color: #f0883e; font-weight: 600; }
+            .signal-death  { color: #f85149; font-weight: 600; }
+            .vol-extreme   { color: #f85149; }
+            .vol-high      { color: #d29922; }
+            .vol-elevated  { color: #3fb950; }
+</style>
+    </head>
+    <body>
+        <h1>📈 Market Data Pipeline</h1>
+        <div id="loading">Loading dashboard data...</div>
+        <div id="content" style="display:none;">
+
+            <h2>Pipeline Overview</h2>
+            <div class="grid" id="overview-cards"></div>
+
+            <!-- ── Chart ── -->
+            <h2>Price Chart</h2>
+            <div id="chart-section">
+                <div class="search-row">
+                    <input
+                        id="ticker-input"
+                        type="text"
+                        placeholder="e.g. AAPL"
+                        maxlength="10"
+                    />
+                    <button id="search-btn" onclick="searchTicker()">Load Chart</button>
+                </div>
+                <div id="chart-header">
+                    <div id="chart-title">—</div>
+                    <div id="chart-status">Click a ticker in the tables below, or search above.</div>
+                </div>
+                <div id="chart-canvas-wrap">
+                    <canvas id="price-chart"></canvas>
+                </div>
+            </div>
+
+            
+            <h2>Stock Screener</h2>
+            <div id="screener-section">
+                <div class="screener-filters">
+                    <div class="filter-group">
+                        <label>Min Daily Return %</label>
+                        <input type="number" id="f-min-return" placeholder="e.g. 2" step="0.1">
+                    </div>
+                    <div class="filter-group">
+                        <label>Max Daily Return %</label>
+                        <input type="number" id="f-max-return" placeholder="e.g. -2" step="0.1">
+                    </div>
+                    <div class="filter-group">
+                        <label>Min Volume Ratio</label>
+                        <input type="number" id="f-min-vol-ratio" placeholder="e.g. 1.5" step="0.1">
+                    </div>
+                    <div class="filter-group">
+                        <label>Price vs MA50</label>
+                        <select id="f-ma50">
+                            <option value="">Any</option>
+                            <option value="above">Above MA50 (uptrend)</option>
+                            <option value="below">Below MA50 (downtrend)</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>Price vs MA20</label>
+                        <select id="f-ma20">
+                            <option value="">Any</option>
+                            <option value="above">Above MA20</option>
+                            <option value="below">Below MA20</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>Crossover Signal</label>
+                        <select id="f-crossover">
+                            <option value="">Any</option>
+                            <option value="golden_cross">Golden Cross (bullish)</option>
+                            <option value="death_cross">Death Cross (bearish)</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>Volume Anomaly</label>
+                        <select id="f-vol-cat">
+                            <option value="">Any</option>
+                            <option value="elevated">Elevated</option>
+                            <option value="high">High</option>
+                            <option value="extreme">Extreme</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>Day Direction</label>
+                        <select id="f-direction">
+                            <option value="">Any</option>
+                            <option value="up">Up</option>
+                            <option value="down">Down</option>
+                            <option value="flat">Flat</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>Sector</label>
+                        <select id="f-sector">
+                            <option value="">All Sectors</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="screener-actions">
+                    <button id="run-screener-btn" onclick="runScreener()">Run Screener</button>
+                    <button id="clear-screener-btn" onclick="clearScreener()">Clear</button>
+                    <span id="screener-result-count"></span>
+                </div>
+                <div id="screener-results"></div>
+            </div>
+<h2>Top 10 Gainers <span id="sector-badge" style="color:#58a6ff;font-size:12px;margin-left:8px;"></span></h2>
+            <table id="gainers-table"><thead><tr>
+                <th>Ticker</th><th>Name</th><th>Sector</th>
+                <th>Open</th><th>Close</th><th>Change %</th>
+            </tr></thead><tbody></tbody></table>
+
+            <h2>Top 10 Losers</h2>
+            <table id="losers-table"><thead><tr>
+                <th>Ticker</th><th>Name</th><th>Sector</th>
+                <th>Open</th><th>Close</th><th>Change %</th>
+            </tr></thead><tbody></tbody></table>
+
+            <h2>Sector Coverage</h2>
+            <p class="sector-hint">Click a sector to filter the movers tables. Click again to clear.</p>
+            <table id="sectors-table"><thead><tr>
+                <th>Sector</th><th>Stocks</th><th>Total Bars</th>
+            </tr></thead><tbody></tbody></table>
+
+            <h2>Data Quality</h2>
+            <div class="grid" id="quality-cards"></div>
+
+        </div>
+
+        <script>
+        // ── Constants ────────────────────────────────────────────────
+        const API_KEY = "{{ api_key }}";
+
+        // ── State ────────────────────────────────────────────────────
+        let allMoversData = null;   // full movers response, kept in memory
+        let activeSector  = null;   // currently selected sector filter
+        let priceChart    = null;   // Chart.js instance — destroyed on redraw
+
+        // ── Moving average helper ────────────────────────────────────
+        // Given an array of numbers and a window size N, returns an array
+        // of the same length where each index holds the mean of the
+        // preceding N values (inclusive). The first N-1 values are null
+        // so Chart.js skips them rather than drawing a misleading line.
+        function calcMA(values, n) {
+            return values.map((_, i) => {
+                if (i < n - 1) return null;
+                const slice = values.slice(i - n + 1, i + 1);
+                return slice.reduce((a, b) => a + b, 0) / n;
+            });
+        }
+
+        // ── Chart loader ─────────────────────────────────────────────
+        async function loadChart(ticker) {
+            ticker = ticker.toUpperCase().trim();
+            if (!ticker) return;
+
+            document.getElementById("chart-title").textContent = ticker;
+            document.getElementById("chart-status").textContent = "Loading…";
+            document.getElementById("ticker-input").value = ticker;
+
+            // 90-day window
+            const end   = new Date();
+            const start = new Date();
+            start.setDate(end.getDate() - 180);
+            const fmt = d => d.toISOString().slice(0, 10);
+
+            let data;
+            try {
+                const resp = await fetch(
+                    `/api/ohlcv/${ticker}?start_date=${fmt(start)}&end_date=${fmt(end)}&limit=500`,
+                    { headers: { "X-API-Key": API_KEY } }
+                );
+                if (!resp.ok) {
+                    const err = await resp.json();
+                    document.getElementById("chart-status").textContent =
+                        err.detail || `Error ${resp.status}`;
+                    return;
+                }
+                data = await resp.json();
+            } catch (e) {
+                document.getElementById("chart-status").textContent = "Network error: " + e.message;
+                return;
+            }
+
+            if (!data.data || data.data.length === 0) {
+                document.getElementById("chart-status").textContent = "No data for this ticker.";
+                return;
+            }
+
+            // Sort ascending by date (API may return newest-first)
+            data.data.sort((a, b) => a.date.localeCompare(b.date));
+
+            const labels = data.data.map(r => r.date);
+            const closes = data.data.map(r => parseFloat(r.close));
+            const ma20   = calcMA(closes, 20);
+            const ma50   = calcMA(closes, 50);
+
+            const latestClose  = closes[closes.length - 1];
+            const latestChange = closes.length >= 2
+                ? (((latestClose - closes[closes.length - 2]) / closes[closes.length - 2]) * 100).toFixed(2)
+                : null;
+            const changeStr = latestChange !== null
+                ? ` — ${latestClose.toFixed(2)} (${latestChange >= 0 ? "+" : ""}${latestChange}%)`
+                : ` — ${latestClose.toFixed(2)}`;
+            document.getElementById("chart-status").textContent =
+                `Last 90 days${changeStr}`;
+
+            // Destroy previous chart instance before creating a new one.
+            // Chart.js throws if you call new Chart() on a canvas that
+            // already has a chart attached.
+            if (priceChart) {
+                priceChart.destroy();
+                priceChart = null;
+            }
+
+            const ctx = document.getElementById("price-chart").getContext("2d");
+            priceChart = new Chart(ctx, {
+                type: "line",
+                data: {
+                    labels,
+                    datasets: [
+                        {
+                            label: `${ticker} Close`,
+                            data: closes,
+                            borderColor: "#58a6ff",
+                            backgroundColor: "rgba(88,166,255,0.08)",
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            fill: true,
+                            tension: 0.1,
+                        },
+                        {
+                            label: "MA20",
+                            data: ma20,
+                            borderColor: "#f0883e",
+                            borderWidth: 1.5,
+                            pointRadius: 0,
+                            fill: false,
+                            tension: 0.1,
+                            spanGaps: false,
+                        },
+                        {
+                            label: "MA50",
+                            data: ma50,
+                            borderColor: "#3fb950",
+                            borderWidth: 1.5,
+                            pointRadius: 0,
+                            fill: false,
+                            tension: 0.1,
+                            spanGaps: false,
+                        },
+                    ],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: "index", intersect: false },
+                    plugins: {
+                        legend: {
+                            labels: { color: "#8b949e", boxWidth: 20, font: { size: 12 } },
+                        },
+                        tooltip: {
+                            backgroundColor: "#161b22",
+                            borderColor: "#30363d",
+                            borderWidth: 1,
+                            titleColor: "#e1e4e8",
+                            bodyColor: "#8b949e",
+                            callbacks: {
+                                label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y?.toFixed(2) ?? "—"}`,
+                            },
+                        },
+                    },
+                    scales: {
+                        x: {
+                            ticks: {
+                                color: "#8b949e",
+                                maxTicksLimit: 8,
+                                font: { size: 11 },
+                            },
+                            grid: { color: "#21262d" },
+                        },
+                        y: {
+                            ticks: {
+                                color: "#8b949e",
+                                font: { size: 11 },
+                                callback: v => "$" + v.toFixed(2),
+                            },
+                            grid: { color: "#21262d" },
+                        },
+                    },
+                },
+            });
+        }
+
+        // ── Search box handler ───────────────────────────────────────
+        function searchTicker() {
+            const val = document.getElementById("ticker-input").value.trim();
+            if (val) loadChart(val);
+        }
+
+        // Allow pressing Enter in the input box
+        document.addEventListener("DOMContentLoaded", () => {
+            document.getElementById("ticker-input")
+                .addEventListener("keydown", e => {
+                    if (e.key === "Enter") searchTicker();
+                });
+        });
+
+        // ── Movers renderer ──────────────────────────────────────────
+        // Accepts a full array of stocks and an optional sector string.
+        // When sector is set, it filters before slicing top/bottom 10.
+        function renderMovers(allStocks, sector) {
+            let filtered = sector
+                ? allStocks.filter(s => s.sector === sector)
+                : allStocks;
+
+            // Re-sort since filter can change order
+            filtered = [...filtered].sort((a, b) => b.daily_return_pct - a.daily_return_pct);
+
+            const gainers = filtered.slice(0, 10);
+            const losers  = [...filtered].reverse().slice(0, 10);
+
+            function rows(stocks) {
+                if (!stocks.length) return '<tr><td colspan="6" style="color:#8b949e">No data</td></tr>';
+                return stocks.map(s => `
+                    <tr onclick="loadChart('${s.ticker}')" title="Click to load chart">
+                        <td class="ticker-cell">${s.ticker}</td>
+                        <td>${s.name || ''}</td>
+                        <td>${s.sector || ''}</td>
+                        <td>$${s.open?.toFixed(2)}</td>
+                        <td>$${s.close?.toFixed(2)}</td>
+                        <td class="${s.daily_return_pct >= 0 ? 'positive' : 'negative'}">
+                            ${s.daily_return_pct >= 0 ? '+' : ''}${s.daily_return_pct}%
+                        </td>
+                    </tr>
+                `).join('');
+            }
+
+            document.querySelector('#gainers-table tbody').innerHTML = rows(gainers);
+            document.querySelector('#losers-table tbody').innerHTML  = rows(losers);
+
+            const badge = document.getElementById('sector-badge');
+            badge.textContent = sector ? `· ${sector}` : '';
+        }
+
+        // ── Sector click handler ─────────────────────────────────────
+        function handleSectorClick(sector, rowEl) {
+            // Toggle: clicking active sector clears the filter
+            if (activeSector === sector) {
+                activeSector = null;
+                rowEl.classList.remove('active-sector');
+            } else {
+                // Clear previous highlight
+                document.querySelectorAll('#sectors-table tbody tr')
+                    .forEach(r => r.classList.remove('active-sector'));
+                activeSector = sector;
+                rowEl.classList.add('active-sector');
+            }
+            if (allMoversData) {
+                renderMovers(allMoversData, activeSector);
+            }
+        }
+
+        // ── Main dashboard loader ────────────────────────────────────
+        async function loadDashboard() {
+            try {
+                const [overview, movers, sectors, quality] =
+                    await Promise.all([
+                        fetch('/api/dashboard/overview').then(r => r.json()),
+                        fetch('/api/dashboard/movers').then(r => r.json()),
+                        fetch('/api/dashboard/sectors').then(r => r.json()),
+                        fetch('/api/dashboard/data-quality').then(r => r.json()),
+                    ]);
+
+                // ── Overview cards ───────────────────────────────────
+                const statusClass = overview.last_pipeline_run?.status === 'success'
+                    ? 'status-good' : 'status-failed';
+
+                document.getElementById('overview-cards').innerHTML = `
+                    <div class="card">
+                        <div class="label">Stocks Tracked</div>
+                        <div class="value">${overview.stocks_tracked}</div>
+                    </div>
+                    <div class="card">
+                        <div class="label">Total Data Points</div>
+                        <div class="value">${overview.total_data_points?.toLocaleString()}</div>
+                    </div>
+                    <div class="card">
+                        <div class="label">Date Range</div>
+                        <div class="value" style="font-size:18px">
+                            ${overview.date_range?.earliest_date || 'N/A'} →
+                            ${overview.date_range?.latest_date || 'N/A'}
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="label">Last Pipeline Run</div>
+                        <div class="value ${statusClass}" style="font-size:24px">
+                            ${overview.last_pipeline_run?.status?.toUpperCase() || 'N/A'}
+                        </div>
+                        <div class="sub">
+                            ${overview.pipeline_reliability?.successes}/${overview.pipeline_reliability?.last_30_runs} successful
+                        </div>
+                    </div>
+                `;
+
+                // ── Movers ───────────────────────────────────────────
+                // Store full list so sector filter can re-render without
+                // another network request.
+                allMoversData = [
+                    ...(movers.top_10_gainers || []),
+                    ...(movers.top_10_losers  || []),
+                ];
+                // Deduplicate (a stock could appear in both if <20 total)
+                const seen = new Set();
+                allMoversData = allMoversData.filter(s => {
+                    if (seen.has(s.ticker)) return false;
+                    seen.add(s.ticker);
+                    return true;
+                });
+
+                renderMovers(allMoversData, null);
+
+                // ── Sectors ──────────────────────────────────────────
+                const sectorsTbody = document.querySelector('#sectors-table tbody');
+                populateSectorDropdown(sectors.sectors || []);
+                sectorsTbody.innerHTML = sectors.sectors?.map(s => `
+                    <tr onclick="handleSectorClick('${s.sector}', this)">
+                        <td>${s.sector}</td>
+                        <td>${s.stock_count}</td>
+                        <td>${s.total_bars?.toLocaleString()}</td>
+                    </tr>
+                `).join('') || '';
+
+                // ── Quality cards ────────────────────────────────────
+                const qClass = quality.health_score === 'GOOD'
+                    ? 'status-good'
+                    : quality.health_score === 'WARNING'
+                        ? 'status-warning' : 'status-failed';
+
+                document.getElementById('quality-cards').innerHTML = `
+                    <div class="card">
+                        <div class="label">Health Score</div>
+                        <div class="value ${qClass}">${quality.health_score}</div>
+                    </div>
+                    <div class="card">
+                        <div class="label">OHLC Violations</div>
+                        <div class="value">${quality.ohlc_violations}</div>
+                    </div>
+                    <div class="card">
+                        <div class="label">Zero Volume Days (30d)</div>
+                        <div class="value">${quality.zero_volume_days_last_30d}</div>
+                    </div>
+                    <div class="card">
+                        <div class="label">Low Coverage Stocks</div>
+                        <div class="value">${quality.low_coverage_stocks?.length || 0}</div>
+                    </div>
+                `;
+
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('content').style.display = 'block';
+
+            } catch (e) {
+                document.getElementById('loading').innerText =
+                    'Error loading dashboard: ' + e.message;
+            }
+        }
+
+        
+        async function runScreener() {
+            const btn = document.getElementById('run-screener-btn');
+            btn.textContent = 'Running...';
+            btn.disabled = true;
+            const params = new URLSearchParams();
+            const minReturn   = document.getElementById('f-min-return').value;
+            const maxReturn   = document.getElementById('f-max-return').value;
+            const minVolRatio = document.getElementById('f-min-vol-ratio').value;
+            const ma50        = document.getElementById('f-ma50').value;
+            const ma20        = document.getElementById('f-ma20').value;
+            const crossover   = document.getElementById('f-crossover').value;
+            const volCat      = document.getElementById('f-vol-cat').value;
+            const direction   = document.getElementById('f-direction').value;
+            const sector      = document.getElementById('f-sector').value;
+            if (minReturn)   params.append('min_return',       minReturn);
+            if (maxReturn)   params.append('max_return',       maxReturn);
+            if (minVolRatio) params.append('min_volume_ratio', minVolRatio);
+            if (ma50)        params.append('price_vs_ma50',    ma50);
+            if (ma20)        params.append('price_vs_ma20',    ma20);
+            if (crossover)   params.append('crossover_signal', crossover);
+            if (volCat)      params.append('volume_category',  volCat);
+            if (direction)   params.append('day_direction',    direction);
+            if (sector)      params.append('sector',           sector);
+            try {
+                const resp = await fetch(
+                    `/api/screener?${params.toString()}`,
+                    { headers: { 'X-API-Key': API_KEY } }
+                );
+                const data = await resp.json();
+                if (!resp.ok) {
+                    document.getElementById('screener-results').innerHTML =
+                        `<p style="color:#f85149">${data.detail || 'Error running screener'}</p>`;
+                    document.getElementById('screener-result-count').textContent = '';
+                    return;
+                }
+                document.getElementById('screener-result-count').textContent =
+                    `${data.count} stock${data.count !== 1 ? 's' : ''} match · ${data.screen_date}`;
+                if (data.count === 0) {
+                    document.getElementById('screener-results').innerHTML =
+                        '<p style="color:#8b949e;padding:12px 0">No stocks match these filters.</p>';
+                    return;
+                }
+                const rows = data.results.map(s => {
+                    const retClass   = s.daily_return_pct >= 0 ? 'positive' : 'negative';
+                    const retSign    = s.daily_return_pct >= 0 ? '+' : '';
+                    const crossClass = s.crossover_signal === 'golden_cross' ? 'signal-golden'
+                                     : s.crossover_signal === 'death_cross'  ? 'signal-death' : '';
+                    const crossLabel = s.crossover_signal === 'golden_cross' ? 'Golden Cross'
+                                     : s.crossover_signal === 'death_cross'  ? 'Death Cross' : '-';
+                    const volClass   = s.volume_category === 'extreme'  ? 'vol-extreme'
+                                     : s.volume_category === 'high'     ? 'vol-high'
+                                     : s.volume_category === 'elevated' ? 'vol-elevated' : '';
+                    const volLabel   = s.volume_category
+                                     ? s.volume_category.charAt(0).toUpperCase() + s.volume_category.slice(1)
+                                     : '-';
+                    return `<tr onclick="loadChart('${s.ticker}')" title="Click to load chart">
+                        <td class="ticker-cell">${s.ticker}</td>
+                        <td>${s.name || ''}</td>
+                        <td>${s.sector || ''}</td>
+                        <td>$${s.close?.toFixed(2)}</td>
+                        <td class="${retClass}">${retSign}${s.daily_return_pct?.toFixed(2)}%</td>
+                        <td>${s.price_vs_ma20} / ${s.price_vs_ma50}</td>
+                        <td class="${crossClass}">${crossLabel}</td>
+                        <td>${s.volume_ratio?.toFixed(2)}x <span class="${volClass}">${volLabel !== '-' ? volLabel : ''}</span></td>
+                    </tr>`;
+                }).join('');
+                document.getElementById('screener-results').innerHTML = `
+                    <table>
+                        <thead><tr>
+                            <th>Ticker</th><th>Name</th><th>Sector</th>
+                            <th>Close</th><th>Return %</th>
+                            <th>MA20/MA50</th><th>Signal</th><th>Volume</th>
+                        </tr></thead>
+                        <tbody>${rows}</tbody>
+                    </table>`;
+            } catch(e) {
+                document.getElementById('screener-results').innerHTML =
+                    `<p style="color:#f85149">Network error: ${e.message}</p>`;
+            } finally {
+                btn.textContent = 'Run Screener';
+                btn.disabled = false;
+            }
+        }
+
+        function clearScreener() {
+            ['f-min-return','f-max-return','f-min-vol-ratio'].forEach(id => {
+                document.getElementById(id).value = '';
+            });
+            ['f-ma50','f-ma20','f-crossover','f-vol-cat','f-direction','f-sector'].forEach(id => {
+                document.getElementById(id).value = '';
+            });
+            document.getElementById('screener-results').innerHTML = '';
+            document.getElementById('screener-result-count').textContent = '';
+        }
+
+        function populateSectorDropdown(sectors) {
+            const select = document.getElementById('f-sector');
+            sectors.forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s.sector;
+                opt.textContent = s.sector;
+                select.appendChild(opt);
+            });
+        }
+
+loadDashboard();
+        </script>
+    </body>
+    </html>
+    
